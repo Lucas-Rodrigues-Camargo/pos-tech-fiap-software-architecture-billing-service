@@ -1,0 +1,21 @@
+{
+  "service": "billing",
+  "tests": {
+    "total": 19,
+    "executed": 19,
+    "passed": 19,
+    "failed": 0
+  },
+  "coverage": {
+    "lines": 93.76,
+    "branches": 87.09,
+    "linesCovered": 301,
+    "linesValid": 321,
+    "threshold": 80,
+    "excluded": "generated source under obj only"
+  },
+  "scope": "Local/CI tests; PostgreSQL or DynamoDB LocalStack, API host, workflow and SQS adapter",
+  "awsDeploymentVerified": false,
+  "mercadoPagoSandboxVerified": false,
+  "sonarServerVerified": false
+}
