@@ -6,8 +6,10 @@ public sealed class ServiceWorkflow(IPayments payments) : IWorkflow
         switch (m.Type)
         {
             case "GenerateBudget":
+                if (s.Status is "Canceled" or "Refunded") break;
                 s.Require("New");
-                if (m.Data.Amount <= 0) throw new ArgumentException("Positive budget required.");
+                if (m.Data.Amount <= 0 || decimal.Round(m.Data.Amount, 2) != m.Data.Amount)
+                    throw new ArgumentException("Positive budget with at most two decimal places required.");
                 s.Data = m.Data; s.Move("WaitingApproval"); s.Emit(m, "BudgetGenerated", "os"); break;
             case "DecideBudget":
                 s.Require("WaitingApproval");
@@ -19,10 +21,16 @@ public sealed class ServiceWorkflow(IPayments payments) : IWorkflow
                     s.Data = s.Data with { CheckoutUrl = await payments.Checkout(s.Id, s.Data.Amount, ct) };
                 break;
             case "VerifyPayment":
-                s.Require("WaitingPayment", "Paid", "Canceled");
+                s.Require("WaitingPayment", "Paid", "Canceled", "RefundPending", "Refunded");
                 var payment = await payments.Get(m.Data.PaymentId, ct);
                 if (payment.OrderId != s.Id || payment.Amount != s.Data.Amount || payment.Currency != "BRL")
                     throw new ArgumentException("Payment reference, currency or amount mismatch.");
+                if (s.Status is "RefundPending" or "Refunded")
+                {
+                    if (s.Data.PaymentId != payment.Id)
+                        throw new InvalidOperationException("Additional payment requires reconciliation.");
+                    break;
+                }
                 if (payment.Status != "approved") break;
                 if (s.Status == "Paid")
                 {
@@ -33,12 +41,13 @@ public sealed class ServiceWorkflow(IPayments payments) : IWorkflow
                 if (s.Status == "Canceled")
                 {
                     s.Move("RefundPending");
-                    await payments.Refund(payment.Id, s.Id, ct);
-                    s.Move("Refunded"); break;
+                    s.Emit(m, "RefundPayment", "billing");
+                    break;
                 }
                 s.Move("Paid"); s.Emit(m, "PaymentConfirmed", "os"); break;
             case "CancelBudget":
-                if (s.Status is "Paid" or "RefundPending")
+                if (s.Status == "RefundPending") break;
+                if (s.Status == "Paid")
                 {
                     s.Move("RefundPending");
                     s.Emit(m, "RefundPayment", "billing");
@@ -47,6 +56,7 @@ public sealed class ServiceWorkflow(IPayments payments) : IWorkflow
                 else if (s.Status != "Refunded") s.Move("Canceled");
                 s.Emit(m, "BudgetCanceled", "os"); break;
             case "RefundPayment":
+                if (s.Status == "Refunded") break;
                 s.Require("RefundPending");
                 await payments.Refund(s.Data.PaymentId, s.Id, ct);
                 s.Move("Refunded");
